@@ -1,0 +1,66 @@
+:root {
+  --lcd-dark: #1f2a1c; --lcd-mid: #4b6a3a; --lcd-light: #b9c98f; --lcd-pale: #dbe5bd;
+  --paper: #eef2dc; --ok: #3f8f3f; --warn: #d4a017; --low: #b3392b;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--lcd-light); color: var(--lcd-dark);
+  font: 400 1rem/1.5 'Atkinson Hyperlegible', system-ui, sans-serif;
+}
+#app { max-width: 880px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+h1, h2, h3 { font-family: 'Silkscreen', monospace; margin: 0; letter-spacing: .02em; }
+header { border-bottom: 3px solid var(--lcd-dark); padding-bottom: .75rem; margin-bottom: 1.25rem; }
+header h1 { font-size: 2rem; }
+header p { margin: .25rem 0 0; }
+header.slim h1 { font-size: 1.4rem; }
+
+.team { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .75rem; }
+.card { background: var(--paper); border: 2px solid var(--lcd-dark); padding: .6rem .8rem; display: grid; grid-template-columns: 76px 1fr; column-gap: .6rem; }
+.card img { grid-row: span 3; width: 72px; height: 72px; object-fit: contain; image-rendering: pixelated; align-self: center; }
+.card h3 { font-size: .95rem; }
+.card .meta { margin: 0; font-size: .8rem; color: var(--lcd-mid); }
+.card ul { margin: .25rem 0 0; padding: 0; list-style: none; font-size: .85rem; grid-column: 2; }
+
+.roster { margin-top: 1.5rem; }
+.roster h2 { font-size: 1rem; margin-bottom: .5rem; }
+.roster ol { margin: 0; padding-left: 1.6rem; columns: 2 260px; }
+.roster li span { font-size: .85rem; color: var(--lcd-mid); }
+.roster li.beaten { text-decoration: line-through; opacity: .6; }
+.roster li.next { background: var(--lcd-dark); color: var(--paper); margin-left: -.4rem; padding-left: .4rem; }
+.roster li.next span { color: var(--lcd-light); }
+.roster li.soon { opacity: .45; }
+
+button {
+  font: 700 1rem 'Atkinson Hyperlegible', sans-serif; color: var(--paper); background: var(--lcd-dark);
+  border: 0; padding: .7rem 1.2rem; cursor: pointer; box-shadow: 0 4px 0 var(--lcd-mid);
+}
+button:hover:not(:disabled) { background: #2e4128; }
+button:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+.action { margin-top: 1.5rem; }
+.result { padding: .8rem 1rem; border: 2px solid var(--lcd-dark); background: var(--paper); margin: 0; }
+.result.won { border-color: var(--ok); }
+.result.lost { border-color: var(--low); }
+
+.field { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; background: var(--lcd-pale); border: 3px solid var(--lcd-dark); padding: .75rem; min-height: 230px; }
+.side { display: flex; flex-direction: column; gap: .4rem; align-items: center; justify-content: space-between; }
+.side.foe { align-items: flex-end; } .side.you { align-items: flex-start; flex-direction: column-reverse; }
+.side img { max-height: 120px; image-rendering: pixelated; }
+.plate { background: var(--paper); border: 2px solid var(--lcd-dark); padding: .3rem .6rem; width: min(100%, 240px); display: grid; grid-template-columns: 1fr auto; font-size: .9rem; }
+.bar { grid-column: span 2; height: 8px; background: var(--lcd-light); margin-top: .25rem; }
+.bar i { display: block; height: 100%; transition: width .4s; }
+.bar .ok { background: var(--ok); } .bar .warn { background: var(--warn); } .bar .low { background: var(--low); }
+
+.log { height: 9.5rem; overflow-y: auto; background: var(--paper); border: 2px solid var(--lcd-dark); border-top: 0; padding: .4rem .75rem; font-size: .95rem; }
+.log p { margin: 0; }
+.controls { margin-top: .9rem; display: grid; gap: .6rem; }
+.prompt { margin: 0; font-weight: 700; }
+.moves { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.mv, .sw { text-align: left; display: flex; flex-direction: column; }
+.mv small, .sw small { font-weight: 400; opacity: .85; font-size: .78rem; }
+.switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .4rem; }
+.sw { background: var(--lcd-mid); box-shadow: 0 3px 0 var(--lcd-dark); padding: .45rem .7rem; font-size: .85rem; }
+
+@media (max-width: 520px) { .moves { grid-template-columns: 1fr; } .field { min-height: 190px; } }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
