@@ -4,5 +4,17 @@
     "strict": true, "skipLibCheck": true, "lib": ["ES2022", "DOM"],
     "types": ["vite/client", "node"], "noEmit": true
   },
-  "include": ["src", "scripts"]
+  "files": [
+    "src/main.ts",
+    "src/data.ts",
+    "src/teams.ts",
+    "src/battle.ts",
+    "src/log.ts",
+    "src/rng.ts",
+    "src/stats.ts",
+    "src/roster-draft.ts",
+    "scripts/smoke.ts",
+    "scripts/validate.ts",
+    "scripts/generate-pool.ts"
+  ]
 }

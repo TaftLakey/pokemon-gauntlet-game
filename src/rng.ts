@@ -25,6 +25,11 @@ export function shuffle<T>(arr: T[], rand: () => number): T[] {
 /** Everyone shares the same day: UTC date, YYYY-MM-DD. */
 export const todayKey = () => new Date().toISOString().slice(0, 10);
 
+/** Four random 16-bit numbers for dynamic battle simulation. */
+export function randomBattleSeed(): number[] {
+  return [0, 1, 2, 3].map(() => Math.floor(Math.random() * 65536));
+}
+
 /** Four 16-bit numbers, the seed format the Showdown sim expects. */
 export function battleSeed(key: string, index: number): number[] {
   const r = mulberry32(hashString(`battle:${key}:${index}`));

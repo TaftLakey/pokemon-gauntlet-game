@@ -14,7 +14,7 @@ export interface BattleOptions {
   playerTeam: PokemonSet[];
   foeTeam: PokemonSet[];
   foeName: string;
-  seed: number[];
+  seed?: number[];
   events: BattleEvents;
 }
 
@@ -27,8 +27,10 @@ export class BattleRunner {
 
   start() {
     const { o } = this;
+    const startOpts: any = { formatid: 'gen9customgame' };
+    if (o.seed) startOpts.seed = o.seed;
     void this.streams.omniscient.write(
-      `>start ${JSON.stringify({ formatid: 'gen9customgame', seed: o.seed })}\n` +
+      `>start ${JSON.stringify(startOpts)}\n` +
       `>player p1 ${JSON.stringify({ name: 'You', team: Teams.pack(o.playerTeam) })}\n` +
       `>player p2 ${JSON.stringify({ name: o.foeName, team: Teams.pack(o.foeTeam) })}`
     );
