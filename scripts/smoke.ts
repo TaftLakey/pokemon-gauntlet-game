@@ -6,7 +6,7 @@ import { battleSeed } from '../src/rng';
 
 const key = '2026-10-24';
 const team = dailyTeam(key);
-console.log('Team:', team.map((s) => s.species).join(', '));
+console.log('Team:', team.map((s) => `${s.species} (Lv${s.level})`).join(', '));
 
 for (let i = 0; i < KANTO.length; i++) {
   const t = KANTO[i];

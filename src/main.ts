@@ -175,12 +175,12 @@ function home() {
     </div>`;
 
   app.innerHTML = `
-    <header><h1>Daily Gauntlet</h1><p>Kanto league &middot; ${KEY} &middot; level 100, no EVs</p></header>
+    <header><h1>Daily Gauntlet</h1><p>Kanto league &middot; ${KEY} &middot; balanced levels, no EVs</p></header>
     <section class="team">${team.map((s, i) => `
       <article class="card" data-inspect="bench" data-bench-index="${i}" title="Hover for stat breakdown">
         <img src="${sprite(s.species)}" alt="${s.species}" onerror="this.onerror=null; this.src='${spriteFallback(s.species)}';" />
         <h3>${s.species}</h3>
-        <p class="meta">${s.item} &middot; ${s.ability}</p>
+        <p class="meta">Lv${s.level} &middot; ${s.item} &middot; ${s.ability}</p>
         <ul>${s.moves.map((m) => `<li>${m}</li>`).join('')}</ul>
       </article>`).join('')}
     </section>
@@ -344,10 +344,14 @@ function startBattle(index: number) {
         hpText.className = cls;
       }
     } else {
+      const monLevel = isPlayer
+        ? (team.find((p) => p.species === mon.species || p.species.toLowerCase() === mon.species.toLowerCase())?.level ?? 85)
+        : 85;
+
       // Mount new plate
       slot.innerHTML = `
         <div class="plate" data-inspect="${inspectType}" data-species="${mon.species}" title="Hover for stat breakdown">
-          <b>${label}${mon.species}</b><span>Lv100</span>
+          <b>${label}${mon.species}</b><span>Lv${monLevel}</span>
           <div class="bar"><i class="${cls}" style="width:${mon.pct}%"></i></div>
           <div class="plate-hp"><span class="${cls}">${mon.pct}% HP</span></div>
         </div>`;

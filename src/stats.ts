@@ -2,6 +2,7 @@ import { Dex, PokemonSet } from '@pkmn/sim';
 
 export interface PlayerStatInfo {
   species: string;
+  level: number;
   types: string[];
   baseStats: { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
   exactStats: { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
@@ -15,6 +16,7 @@ export interface PlayerStatInfo {
 
 export interface OpponentStatEstimate {
   species: string;
+  level: number;
   types: string[];
   baseStats: { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
   bst: number;
@@ -25,6 +27,7 @@ export function getPlayerStatInfo(set: PokemonSet): PlayerStatInfo {
   const dexSpecies = Dex.species.get(set.species);
   const base = dexSpecies.baseStats;
   const nat = Dex.natures.get(set.nature);
+  const level = set.level || 85;
 
   const natureMods: Record<string, '+' | '-' | ''> = {
     hp: '',
@@ -39,13 +42,16 @@ export function getPlayerStatInfo(set: PokemonSet): PlayerStatInfo {
     let mult = 1.0;
     if (nat.plus === stat) mult = 1.1;
     else if (nat.minus === stat) mult = 0.9;
-    return Math.floor((2 * base[stat] + 36) * mult);
+    return Math.floor((Math.floor(((2 * base[stat] + 31) * level) / 100) + 5) * mult);
   };
 
-  const hp = set.species === 'Shedinja' ? 1 : 2 * base.hp + 141;
+  const hp = set.species === 'Shedinja'
+    ? 1
+    : Math.floor(((2 * base.hp + 31) * level) / 100) + level + 10;
 
   return {
     species: dexSpecies.name || set.species,
+    level,
     types: dexSpecies.types || ['Normal'],
     baseStats: base,
     exactStats: {
@@ -65,19 +71,21 @@ export function getPlayerStatInfo(set: PokemonSet): PlayerStatInfo {
   };
 }
 
-export function getOpponentStatEstimate(speciesName: string): OpponentStatEstimate {
+export function getOpponentStatEstimate(speciesName: string, level = 85): OpponentStatEstimate {
   const dexSpecies = Dex.species.get(speciesName);
   const base = dexSpecies.baseStats;
 
   const estimated: Record<string, { base: number; est: string; range: string }> = {};
 
-  const hp = speciesName === 'Shedinja' ? 1 : 2 * base.hp + 141;
+  const hp = speciesName === 'Shedinja'
+    ? 1
+    : Math.floor(((2 * base.hp + 31) * level) / 100) + level + 10;
   estimated.hp = { base: base.hp, est: `${hp}`, range: 'Exact' };
 
   for (const s of ['atk', 'def', 'spa', 'spd', 'spe'] as const) {
-    const neutral = 2 * base[s] + 36;
-    const min = Math.floor((2 * base[s] + 36) * 0.9);
-    const max = Math.floor((2 * base[s] + 36) * 1.1);
+    const neutral = Math.floor(((2 * base[s] + 31) * level) / 100) + 5;
+    const min = Math.floor(neutral * 0.9);
+    const max = Math.floor(neutral * 1.1);
     estimated[s] = {
       base: base[s],
       est: `~${neutral}`,
@@ -87,6 +95,7 @@ export function getOpponentStatEstimate(speciesName: string): OpponentStatEstima
 
   return {
     species: dexSpecies.name || speciesName,
+    level,
     types: dexSpecies.types || ['Normal'],
     baseStats: base,
     bst: base.hp + base.atk + base.def + base.spa + base.spd + base.spe,
@@ -109,7 +118,7 @@ export function renderPlayerTooltip(info: PlayerStatInfo): string {
     <div class="st-header">
       <div class="st-name-row">
         <span class="st-name">${info.species}</span>
-        <span class="st-level">Lv100 (Your Mon)</span>
+        <span class="st-level">Lv${info.level} (Your Mon)</span>
       </div>
       <div class="st-types">${typesHtml}</div>
     </div>
@@ -149,11 +158,11 @@ export function renderOpponentTooltip(est: OpponentStatEstimate): string {
     <div class="st-header">
       <div class="st-name-row">
         <span class="st-name">Foe ${est.species}</span>
-        <span class="st-level">Lv100 (Foe)</span>
+        <span class="st-level">Lv${est.level} (Foe)</span>
       </div>
       <div class="st-types">${typesHtml}</div>
     </div>
-    <div class="st-sub">Estimated Stats (Lv100 &middot; 0 EVs)</div>
+    <div class="st-sub">Estimated Stats (Lv${est.level} &middot; 0 EVs)</div>
     <div class="st-divider"></div>
     <table class="st-table">
       <thead>

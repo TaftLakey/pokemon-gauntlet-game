@@ -13,7 +13,7 @@ const checkSets = (label: string, sets: PokemonSet[], expect?: number) => {
     if (!Dex.abilities.get(s.ability).exists) problems.push(`ability ${s.ability}`);
     if (!Dex.items.get(s.item).exists) problems.push(`item ${s.item}`);
     for (const m of s.moves) if (!Dex.moves.get(m).exists) problems.push(`move ${m}`);
-    if (s.moves.length !== 4) problems.push(`${s.moves.length} moves`);
+    if (s.moves.length !== 4 && !['Ditto', 'Unown'].includes(s.species)) problems.push(`${s.moves.length} moves`);
     if (problems.length) { console.log(`${label} / ${s.species}: ${problems.join(', ')}`); bad++; }
   }
 };
