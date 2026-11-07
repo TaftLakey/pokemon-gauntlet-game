@@ -5,7 +5,15 @@ import { KANTO, dailyTrainerBuild } from './data';
 import { BattleRunner } from './battle';
 import { formatLine } from './log';
 import { randomBattleSeed, todayKey } from './rng';
-import { dailyTeam, parseTeam } from './teams';
+import {
+  dailyPool10,
+  defaultDailySelection,
+  validateSelection,
+  normalizeSet,
+  type TeamSelectionEntry,
+  parseTeam,
+} from './teams';
+import { getLegalMoves } from './legality';
 import {
   getPlayerStatInfo,
   getOpponentStatEstimate,
@@ -16,21 +24,92 @@ import {
 // ---- daily state -----------------------------------------------------------
 const KEY = todayKey();
 const SAVE_KEY = `gauntlet:${KEY}`;
-const team = dailyTeam(KEY);
+const pool10 = dailyPool10(KEY);
 const AVAILABLE = KANTO.length;
 
-interface Save { status: 'ready' | 'between' | 'inbattle' | 'lost' | 'done'; cleared: number; lostTo?: string }
+interface Save {
+  version?: number;
+  status: 'ready' | 'between' | 'inbattle' | 'lost' | 'done';
+  cleared: number;
+  lostTo?: string;
+  selectedTeam?: TeamSelectionEntry[];
+  bench?: TeamSelectionEntry[];
+}
 
 function load(): Save {
-  let s: Save = { status: 'ready', cleared: 0 };
-  try { s = JSON.parse(localStorage.getItem(SAVE_KEY) ?? '') as Save; } catch { /* first visit */ }
+  let s: Save = { status: 'ready', cleared: 0, version: 1 };
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) s = JSON.parse(raw) as Save;
+  } catch {
+    /* first visit */
+  }
   // Closing the tab mid-battle counts as a forfeit: one attempt per day.
   if (s.status === 'inbattle') s = { status: 'lost', cleared: s.cleared, lostTo: KANTO[s.cleared].name };
   return s;
 }
+
 let save = load();
-const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { /* storage blocked */ } };
+
+function initRosterFromSave(s: Save): TeamSelectionEntry[] {
+  if (s.selectedTeam && Array.isArray(s.selectedTeam) && s.selectedTeam.length === 6) {
+    const val = validateSelection(pool10, s.selectedTeam);
+    if (val.valid) {
+      const active = s.selectedTeam;
+      const activeSpecies = new Set(active.map((x) => x.species.toLowerCase()));
+      const remainingPool = pool10.filter((p) => !activeSpecies.has(p.species.toLowerCase()));
+
+      let bench: TeamSelectionEntry[] = [];
+      if (
+        s.bench &&
+        Array.isArray(s.bench) &&
+        s.bench.length === 4 &&
+        s.bench.every((b) => remainingPool.some((rp) => rp.species.toLowerCase() === b.species.toLowerCase()))
+      ) {
+        bench = s.bench;
+      } else {
+        bench = remainingPool.map((p) => ({ species: p.species, moves: [...p.moves] }));
+      }
+      return [...active, ...bench];
+    }
+  }
+
+  // Fallback to default 10-pool
+  return pool10.map((p) => ({ species: p.species, moves: [...p.moves] }));
+}
+
+let selectedRoster: TeamSelectionEntry[] = initRosterFromSave(save);
+
+const persist = () => {
+  try {
+    save.version = 1;
+    save.selectedTeam = selectedRoster.slice(0, 6);
+    save.bench = selectedRoster.slice(6, 10);
+    localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+  } catch {
+    /* storage blocked */
+  }
+};
 persist();
+
+function getRosterSets(): PokemonSet[] {
+  const map = new Map<string, PokemonSet>();
+  for (const p of pool10) map.set(p.species.toLowerCase(), p);
+  return selectedRoster.map((entry) => {
+    const template = map.get(entry.species.toLowerCase()) || pool10[0];
+    return normalizeSet({
+      ...template,
+      moves: [...entry.moves],
+    });
+  });
+}
+
+function getActiveTeamSets(): PokemonSet[] {
+  const val = validateSelection(pool10, selectedRoster.slice(0, 6));
+  return val.team;
+}
+
+let currentBattlePlayerTeam: PokemonSet[] = getActiveTeamSets();
 
 // ---- helpers ---------------------------------------------------------------
 const app = document.getElementById('app')!;
@@ -100,9 +179,12 @@ function showTooltipFor(target: HTMLElement) {
   const type = target.dataset.inspect;
   if (!type) return;
 
-  if (type === 'bench') {
-    const idx = Number(target.dataset.benchIndex ?? 0);
-    const s = team[idx];
+  if (type === 'bench' || target.dataset.rosterIndex !== undefined) {
+    const idx = target.dataset.rosterIndex !== undefined
+      ? Number(target.dataset.rosterIndex)
+      : Number(target.dataset.benchIndex ?? 0);
+    const sets = getRosterSets();
+    const s = sets[idx] || currentBattlePlayerTeam[idx];
     if (s) {
       tooltipEl.innerHTML = renderPlayerTooltip(getPlayerStatInfo(s));
       tooltipEl.classList.remove('hidden');
@@ -112,8 +194,10 @@ function showTooltipFor(target: HTMLElement) {
     const activeSpecies = currentBattleMons?.p1?.species;
     const s =
       (activeSpecies &&
-        team.find((x) => x.species === activeSpecies || x.species.toLowerCase() === activeSpecies.toLowerCase())) ||
-      team[0];
+        currentBattlePlayerTeam.find(
+          (x) => x.species === activeSpecies || x.species.toLowerCase() === activeSpecies.toLowerCase()
+        )) ||
+      currentBattlePlayerTeam[0];
     if (s) {
       tooltipEl.innerHTML = renderPlayerTooltip(getPlayerStatInfo(s));
       tooltipEl.classList.remove('hidden');
@@ -147,11 +231,184 @@ document.addEventListener('pointerout', (e) => {
   }
 });
 
+// ---- move modal manager ----------------------------------------------------
+const moveModalEl = document.createElement('div');
+moveModalEl.id = 'move-modal';
+moveModalEl.className = 'move-modal-backdrop hidden';
+document.body.appendChild(moveModalEl);
+
+function openMoveModal(rosterIndex: number) {
+  const entry = selectedRoster[rosterIndex];
+  if (!entry) return;
+
+  const template = pool10.find((p) => p.species.toLowerCase() === entry.species.toLowerCase()) || pool10[0];
+  const allLegal = getLegalMoves(template.species);
+
+  // If the template had any legacy factory moves, ensure they are in the available choices
+  for (const defMove of template.moves) {
+    if (!allLegal.some((m) => m.name.toLowerCase() === defMove.toLowerCase())) {
+      const mv = Dex.moves.get(defMove);
+      allLegal.unshift({
+        id: mv.id,
+        name: mv.name,
+        type: mv.type,
+        category: mv.category as 'Physical' | 'Special' | 'Status',
+        basePower: mv.basePower || 0,
+        accuracy: mv.accuracy,
+        pp: mv.pp,
+        shortDesc: mv.shortDesc || '(Factory Move)',
+      });
+    }
+  }
+
+  let currentMoves = [...entry.moves];
+  let activeSlot = 0;
+  let search = '';
+
+  function renderModal() {
+    const q = search.trim().toLowerCase();
+    const filteredMoves = allLegal.filter((m) => {
+      if (!q) return true;
+      return (
+        m.name.toLowerCase().includes(q) ||
+        m.type.toLowerCase().includes(q) ||
+        m.category.toLowerCase().includes(q) ||
+        m.shortDesc.toLowerCase().includes(q)
+      );
+    });
+
+    moveModalEl.innerHTML = `
+      <div class="move-modal-dialog">
+        <div class="modal-header">
+          <h2>Customize Moves: ${template.species}</h2>
+          <button class="modal-close-btn" id="modal-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-slots-section">
+            <div class="modal-section-title">
+              <span>Current Moves (${currentMoves.length}/4)</span>
+              <span style="font-size: .75rem; font-weight: normal; color: var(--lcd-mid);">Click a slot below to choose which move to replace</span>
+            </div>
+            <div class="current-slots-grid">
+              ${currentMoves.map((m, i) => `
+                <div class="slot-select-card ${i === activeSlot ? 'active-slot' : ''}" data-slot-idx="${i}">
+                  <small>Slot ${i + 1}${i === activeSlot ? ' (Active)' : ''}</small>
+                  <b>${m}</b>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div>
+            <input type="text" class="move-search-box" id="move-search-input" placeholder="Search moves by name, type, category, or description..." value="${search.replace(/"/g, '&quot;')}" />
+          </div>
+          <div class="moves-scroll-list" id="modal-moves-list">
+            ${filteredMoves.map((m) => {
+              const isEquipped = currentMoves.includes(m.name);
+              return `
+                <div class="move-choice-item ${isEquipped ? 'equipped' : ''}" data-move-name="${m.name}">
+                  <div class="move-choice-main">
+                    <div class="move-choice-title-row">
+                      <b>${m.name}</b>
+                      <span class="st-type t-${m.type.toLowerCase()}">${m.type}</span>
+                      <span class="category-badge cat-${m.category.toLowerCase()}">${m.category}</span>
+                    </div>
+                    <div class="move-stats-row">
+                      <span>Power: <b>${m.basePower || '&ndash;'}</b></span>
+                      <span>Accuracy: <b>${m.accuracy === true ? '&ndash;' : m.accuracy + '%'}</b></span>
+                      <span>PP: <b>${m.pp}</b></span>
+                    </div>
+                    <p class="move-desc-text">${m.shortDesc}</p>
+                  </div>
+                  <div>
+                    ${isEquipped
+                      ? `<span class="btn-equip-move equipped-badge">&check; Learned</span>`
+                      : `<button class="btn-equip-move" data-equip-name="${m.name}">Equip Slot ${activeSlot + 1}</button>`
+                    }
+                  </div>
+                </div>
+              `;
+            }).join('')}
+            ${filteredMoves.length === 0 ? `<p style="text-align: center; color: var(--lcd-mid); padding: 1rem 0;">No matching moves found.</p>` : ''}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="modal-reset-moves" class="btn-secondary">Reset to Default Moves</button>
+          <button id="modal-done-btn">Save Moves</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('modal-close')?.addEventListener('click', closeModal);
+    document.getElementById('modal-done-btn')?.addEventListener('click', saveAndClose);
+    document.getElementById('modal-reset-moves')?.addEventListener('click', () => {
+      currentMoves = [...template.moves];
+      renderModal();
+    });
+
+    const searchInput = document.getElementById('move-search-input') as HTMLInputElement | null;
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        search = (e.target as HTMLInputElement).value;
+        renderModal();
+        const nextInput = document.getElementById('move-search-input') as HTMLInputElement | null;
+        if (nextInput) {
+          nextInput.focus();
+          nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length);
+        }
+      });
+    }
+
+    moveModalEl.querySelectorAll<HTMLElement>('[data-slot-idx]').forEach((el) => {
+      el.addEventListener('click', () => {
+        activeSlot = Number(el.dataset.slotIdx);
+        renderModal();
+      });
+    });
+
+    moveModalEl.querySelectorAll<HTMLElement>('[data-equip-name]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const moveName = btn.dataset.equipName;
+        if (!moveName || currentMoves.includes(moveName)) return;
+        currentMoves[activeSlot] = moveName;
+        activeSlot = (activeSlot + 1) % 4;
+        renderModal();
+      });
+    });
+
+    moveModalEl.querySelectorAll<HTMLElement>('.move-choice-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const moveName = item.dataset.moveName;
+        if (!moveName || currentMoves.includes(moveName)) return;
+        currentMoves[activeSlot] = moveName;
+        activeSlot = (activeSlot + 1) % 4;
+        renderModal();
+      });
+    });
+  }
+
+  function closeModal() {
+    moveModalEl.classList.add('hidden');
+    moveModalEl.innerHTML = '';
+  }
+
+  function saveAndClose() {
+    selectedRoster[rosterIndex].moves = [...currentMoves];
+    persist();
+    closeModal();
+    home();
+  }
+
+  moveModalEl.classList.remove('hidden');
+  renderModal();
+}
+
 // ---- home screen -----------------------------------------------------------
 function home() {
   currentBattleMons = null;
   hideTooltip();
   const done = save.status === 'lost' || save.status === 'done';
+  const canEdit = save.status === 'ready' || save.status === 'between';
   const next = KANTO[save.cleared];
   const nextBuild = next ? dailyTrainerBuild(next, KEY, save.cleared) : null;
   let action = '';
@@ -174,16 +431,75 @@ function home() {
       ${save.cleared > 0 && save.status !== 'done' ? `<button id="dev-retry-battle" class="btn-dev">Replay Battle ${save.cleared + 1}</button>` : ''}
     </div>`;
 
-  app.innerHTML = `
-    <header><h1>Daily Gauntlet</h1><p>Kanto league &middot; ${KEY} &middot; balanced levels, no EVs</p></header>
-    <section class="team">${team.map((s, i) => `
-      <article class="card" data-inspect="bench" data-bench-index="${i}" title="Hover for stat breakdown">
+  const rosterSets = getRosterSets();
+  const activeSets = rosterSets.slice(0, 6);
+  const benchSets = rosterSets.slice(6, 10);
+
+  function renderCard(s: PokemonSet, rosterIdx: number, isActive: boolean) {
+    const isLead = rosterIdx === 0;
+    const badgeText = isLead ? 'LEAD' : isActive ? `Slot ${rosterIdx + 1}` : `Bench ${rosterIdx - 5}`;
+    const badgeClass = isLead ? 'slot-badge lead-badge' : 'slot-badge';
+    const cardClass = `card builder-card ${isLead ? 'slot-lead' : ''}`;
+
+    const controls = canEdit
+      ? `<div class="card-btn-row">
+          ${isActive && rosterIdx > 0 ? `<button class="btn-card-action" data-action="shift-left" data-slot="${rosterIdx}" title="Move earlier in team">&larr;</button>` : ''}
+          ${isActive && rosterIdx < 5 ? `<button class="btn-card-action" data-action="shift-right" data-slot="${rosterIdx}" title="Move later in team">&rarr;</button>` : ''}
+          ${isActive ? `<button class="btn-card-action" data-action="bench-swap" data-slot="${rosterIdx}" title="Swap with bench">Bench &darr;</button>` : ''}
+          ${!isActive ? `<button class="btn-card-action" data-action="team-swap" data-slot="${rosterIdx}" title="Swap into active team">&uarr; To Team</button>` : ''}
+          <button class="btn-edit-moves" data-action="edit-moves" data-slot="${rosterIdx}" title="Customize moves">Moves &#9998;</button>
+        </div>`
+      : '';
+
+    return `
+      <article class="${cardClass}" draggable="${canEdit ? 'true' : 'false'}" data-roster-index="${rosterIdx}" data-inspect="bench" title="Drag to swap / reorder &middot; Hover for stats">
+        <span class="${badgeClass}">${badgeText}</span>
         <img src="${sprite(s.species)}" alt="${s.species}" onerror="this.onerror=null; this.src='${spriteFallback(s.species)}';" />
-        <h3>${s.species}</h3>
+        <div class="card-header-row">
+          <h3>${s.species}</h3>
+        </div>
         <p class="meta">Lv${s.level} &middot; ${s.item} &middot; ${s.ability}</p>
         <ul>${s.moves.map((m) => `<li>${m}</li>`).join('')}</ul>
-      </article>`).join('')}
-    </section>
+        ${controls}
+      </article>
+    `;
+  }
+
+  const teamSection = canEdit
+    ? `
+      <div class="team-builder-container">
+        <div>
+          <div class="team-group-header">
+            <h2>Active Team (6 / 6)</h2>
+            <span class="subtext">Slot 1 is your Lead &middot; Drag cards to swap or reorder</span>
+          </div>
+          <section class="team-grid">${activeSets.map((s, i) => renderCard(s, i, true)).join('')}</section>
+        </div>
+        <div>
+          <div class="team-group-header">
+            <h2>Bench Reserves (4)</h2>
+            <span class="subtext">Drag bench Pokémon into active team to swap</span>
+          </div>
+          <section class="team-grid">${benchSets.map((s, i) => renderCard(s, i + 6, false)).join('')}</section>
+        </div>
+        <div class="builder-actions-bar">
+          <button id="reset-team" class="btn-secondary">Reset to Default Team &amp; Moves</button>
+        </div>
+      </div>
+    `
+    : `
+      <div class="team-builder-container">
+        <div class="team-group-header">
+          <h2>Active Team</h2>
+          <span class="subtext">Your 6 Pokémon for the daily gauntlet</span>
+        </div>
+        <section class="team-grid">${activeSets.map((s, i) => renderCard(s, i, true)).join('')}</section>
+      </div>
+    `;
+
+  app.innerHTML = `
+    <header><h1>Daily Gauntlet</h1><p>Kanto league &middot; ${KEY} &middot; balanced levels, no EVs</p></header>
+    ${teamSection}
     <section class="roster"><h2>The league</h2><ol>${KANTO.map((t, i) => {
       const state = i < save.cleared ? 'beaten' : i === save.cleared && !done ? 'next' : i >= AVAILABLE ? 'soon' : '';
       const b = dailyTrainerBuild(t, KEY, i);
@@ -192,19 +508,101 @@ function home() {
     <div class="action">${action}</div>
     ${devToolbar}`;
 
+  // Attach drag-and-drop
+  if (canEdit) {
+    let dragSrc: number | null = null;
+    const cards = app.querySelectorAll<HTMLElement>('.card.builder-card');
+    cards.forEach((card) => {
+      card.addEventListener('dragstart', (e) => {
+        dragSrc = Number(card.dataset.rosterIndex);
+        card.classList.add('dragging');
+        e.dataTransfer?.setData('text/plain', dragSrc.toString());
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        cards.forEach((c) => c.classList.remove('drop-target'));
+      });
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        card.classList.add('drop-target');
+      });
+      card.addEventListener('dragleave', () => {
+        card.classList.remove('drop-target');
+      });
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        card.classList.remove('drop-target');
+        const dest = Number(card.dataset.rosterIndex);
+        if (dragSrc !== null && !isNaN(dragSrc) && !isNaN(dest) && dragSrc !== dest) {
+          const tmp = selectedRoster[dragSrc];
+          selectedRoster[dragSrc] = selectedRoster[dest];
+          selectedRoster[dest] = tmp;
+          persist();
+          home();
+        }
+      });
+    });
+
+    // Button controls
+    app.querySelectorAll<HTMLElement>('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const actionType = btn.dataset.action;
+        const slot = Number(btn.dataset.slot);
+        if (isNaN(slot)) return;
+
+        if (actionType === 'shift-left' && slot > 0) {
+          const tmp = selectedRoster[slot];
+          selectedRoster[slot] = selectedRoster[slot - 1];
+          selectedRoster[slot - 1] = tmp;
+          persist();
+          home();
+        } else if (actionType === 'shift-right' && slot < 5) {
+          const tmp = selectedRoster[slot];
+          selectedRoster[slot] = selectedRoster[slot + 1];
+          selectedRoster[slot + 1] = tmp;
+          persist();
+          home();
+        } else if (actionType === 'bench-swap') {
+          // Swap active slot with first bench slot (index 6)
+          const tmp = selectedRoster[slot];
+          selectedRoster[slot] = selectedRoster[6];
+          selectedRoster[6] = tmp;
+          persist();
+          home();
+        } else if (actionType === 'team-swap') {
+          // Swap bench slot with last active slot (index 5)
+          const tmp = selectedRoster[slot];
+          selectedRoster[slot] = selectedRoster[5];
+          selectedRoster[5] = tmp;
+          persist();
+          home();
+        } else if (actionType === 'edit-moves') {
+          openMoveModal(slot);
+        }
+      });
+    });
+
+    document.getElementById('reset-team')?.addEventListener('click', () => {
+      selectedRoster = pool10.map((p) => ({ species: p.species, moves: [...p.moves] }));
+      persist();
+      home();
+    });
+  }
+
   document.getElementById('go')?.addEventListener('click', () => startBattle(save.cleared));
   document.getElementById('retry')?.addEventListener('click', () => {
-    save = { status: 'ready', cleared: 0 };
+    save = { status: 'ready', cleared: 0, version: 1 };
     persist();
     home();
   });
   document.getElementById('dev-reset')?.addEventListener('click', () => {
-    save = { status: 'ready', cleared: 0 };
+    save = { status: 'ready', cleared: 0, version: 1 };
     persist();
     home();
   });
   document.getElementById('dev-retry-battle')?.addEventListener('click', () => {
-    save = { status: 'between', cleared: save.cleared };
+    save = { status: 'between', cleared: save.cleared, version: 1 };
     persist();
     home();
   });
@@ -256,11 +654,13 @@ function startBattle(index: number) {
   const trainer = KANTO[index];
   const build = dailyTrainerBuild(trainer, KEY, index);
   const foeTeam = parseTeam(build.team);
+  const playerTeam = getActiveTeamSets();
+  currentBattlePlayerTeam = playerTeam;
   save = { status: 'inbattle', cleared: index };
   persist();
 
   // Warm up both teams' sprite assets to prevent network/decoding stutter
-  preloadBattleSprites(team, foeTeam);
+  preloadBattleSprites(playerTeam, foeTeam);
 
   const mons: { p1: BattleMon | null; p2: BattleMon | null } = { p1: null, p2: null };
   currentBattleMons = mons;
@@ -345,7 +745,7 @@ function startBattle(index: number) {
       }
     } else {
       const monLevel = isPlayer
-        ? (team.find((p) => p.species === mon.species || p.species.toLowerCase() === mon.species.toLowerCase())?.level ?? 85)
+        ? (playerTeam.find((p) => p.species === mon.species || p.species.toLowerCase() === mon.species.toLowerCase())?.level ?? 85)
         : 85;
 
       // Mount new plate
@@ -511,7 +911,7 @@ function startBattle(index: number) {
 
   // --- Showdown Protocol Event Router (Strict Separation, Zero Double-Dipping) ---
   const runner = new BattleRunner({
-    playerTeam: team,
+    playerTeam,
     foeTeam,
     foeName: trainer.name,
     seed: randomBattleSeed(),
@@ -653,8 +1053,8 @@ function startBattle(index: number) {
 
   // --- Dev Tools Test Drives ---
   document.getElementById('dev-test-switch')?.addEventListener('click', () => {
-    const currentSpecies = mons.p1?.species || team[0].species;
-    const nextTarget = team.find((s) => s.species !== currentSpecies) || team[1] || team[0];
+    const currentSpecies = mons.p1?.species || playerTeam[0].species;
+    const nextTarget = playerTeam.find((s) => s.species !== currentSpecies) || playerTeam[1] || playerTeam[0];
     const hasLive = mons.p1 && mons.p1.pct > 0 && !mons.p1.fainted;
 
     if (hasLive) {

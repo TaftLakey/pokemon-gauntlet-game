@@ -4,10 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx scripts/test-pool.ts",
+    "test:pool": "tsx scripts/test-pool.ts",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "smoke": "tsx scripts/smoke.ts", "validate": "tsx scripts/validate.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "validate": "tsx scripts/validate.ts",
     "generate-pool": "tsx scripts/generate-pool.ts"
   },
   "keywords": [],

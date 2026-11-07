@@ -1,11 +1,18 @@
 // Headless check: random player vs the Brock roster, seeded like the real game.
 import { BattleRunner } from '../src/battle';
-import { dailyTeam, parseTeam } from '../src/teams';
+import { dailyPool10, defaultDailySelection, validateSelection, parseTeam } from '../src/teams';
 import { KANTO, dailyTrainerBuild } from '../src/data';
 import { battleSeed } from '../src/rng';
 
 const key = '2026-10-24';
-const team = dailyTeam(key);
+const pool = dailyPool10(key);
+const selection = defaultDailySelection(pool);
+const validation = validateSelection(pool, selection);
+if (!validation.valid) {
+  console.error('Smoke setup failed: default selection is invalid:', validation.errors);
+  process.exit(1);
+}
+const team = validation.team;
 console.log('Team:', team.map((s) => `${s.species} (Lv${s.level})`).join(', '));
 
 for (let i = 0; i < KANTO.length; i++) {

@@ -855,3 +855,304 @@ header.slim {
 .mv.t-steel { border-left-color: #588094; }
 .mv.t-dark { border-left-color: #50413f; }
 .mv.t-fairy { border-left-color: #db50b0; }
+
+/* ---- Team Setup & Drag-and-Drop Builder --------------------------------- */
+.team-builder-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.team-group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--lcd-dark);
+  padding-bottom: .35rem;
+  margin-bottom: .75rem;
+}
+.team-group-header h2 {
+  font-size: 1.15rem;
+}
+.team-group-header .subtext {
+  font-size: .8rem;
+  color: var(--lcd-mid);
+  font-family: 'Atkinson Hyperlegible', sans-serif;
+  font-weight: normal;
+}
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: .75rem;
+}
+.card.builder-card {
+  position: relative;
+  cursor: grab;
+  user-select: none;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.card.builder-card:active {
+  cursor: grabbing;
+}
+.card.builder-card.slot-lead {
+  border-color: #9c6c00;
+  background: #fbf7df;
+  box-shadow: 0 0 0 2px #d4a017;
+}
+.card.dragging {
+  opacity: .4;
+  transform: scale(0.96);
+}
+.card.drop-target {
+  outline: 3px dashed var(--lcd-dark);
+  outline-offset: 2px;
+  background: var(--lcd-pale);
+}
+.slot-badge {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-family: 'Silkscreen', monospace;
+  font-size: .72rem;
+  padding: .15rem .45rem;
+  background: var(--lcd-pale);
+  border: 1px solid var(--lcd-dark);
+}
+.slot-badge.lead-badge {
+  background: #d4a017;
+  color: #1f2a1c;
+  font-weight: 700;
+  border-color: #9c6c00;
+}
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-right: 3rem;
+}
+.card-btn-row {
+  grid-column: 2;
+  display: flex;
+  gap: .35rem;
+  margin-top: .45rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn-card-action {
+  font-size: .75rem;
+  padding: .2rem .45rem;
+  box-shadow: 0 2px 0 var(--lcd-mid);
+}
+.btn-edit-moves {
+  background: var(--lcd-mid);
+  font-size: .75rem;
+  padding: .2rem .55rem;
+  box-shadow: 0 2px 0 var(--lcd-dark);
+}
+.btn-edit-moves:hover {
+  background: #39522b;
+}
+.builder-actions-bar {
+  display: flex;
+  gap: .75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: .5rem;
+}
+
+/* ---- Move Customization Modal ------------------------------------------ */
+.move-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 42, 28, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+.move-modal-backdrop.hidden {
+  display: none;
+}
+.move-modal-dialog {
+  background: var(--paper);
+  border: 3px solid var(--lcd-dark);
+  box-shadow: 0 8px 0 rgba(31, 42, 28, 0.4);
+  max-width: 680px;
+  width: 100%;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .75rem 1rem;
+  background: var(--lcd-dark);
+  color: var(--paper);
+}
+.modal-header h2 {
+  font-size: 1.15rem;
+  color: var(--paper);
+}
+.modal-close-btn {
+  background: transparent;
+  box-shadow: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0 .4rem;
+  color: var(--paper);
+}
+.modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.modal-body {
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.modal-slots-section {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+.modal-section-title {
+  font-size: .85rem;
+  font-weight: 700;
+  color: var(--lcd-mid);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.current-slots-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .5rem;
+}
+.slot-select-card {
+  border: 2px solid var(--lcd-dark);
+  background: var(--lcd-light);
+  padding: .4rem .5rem;
+  cursor: pointer;
+  text-align: left;
+  transition: all .15s ease;
+}
+.slot-select-card.active-slot {
+  background: #fbf7df;
+  border-color: #d4a017;
+  box-shadow: 0 0 0 2px #d4a017;
+}
+.slot-select-card small {
+  display: block;
+  font-size: .68rem;
+  color: var(--lcd-mid);
+}
+.slot-select-card b {
+  display: block;
+  font-size: .82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.move-search-box {
+  width: 100%;
+  font: 400 .95rem/1.4 'Atkinson Hyperlegible', sans-serif;
+  padding: .5rem .75rem;
+  border: 2px solid var(--lcd-dark);
+  background: var(--lcd-light);
+  color: var(--lcd-dark);
+}
+.move-search-box:focus {
+  outline: 3px solid var(--warn);
+}
+.moves-scroll-list {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: .25rem;
+}
+.move-choice-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .75rem;
+  border: 1px solid var(--lcd-dark);
+  background: var(--lcd-pale);
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.move-choice-item:hover {
+  background: #ccd7a8;
+}
+.move-choice-item.equipped {
+  border-left: 5px solid var(--ok);
+  background: #e2edd5;
+}
+.move-choice-main {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.move-choice-title-row {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+.move-choice-title-row b {
+  font-size: .95rem;
+}
+.category-badge {
+  font-size: .65rem;
+  font-weight: 700;
+  padding: .1rem .35rem;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+.category-badge.cat-physical {
+  background: #ba4010;
+  color: white;
+}
+.category-badge.cat-special {
+  background: #2980ef;
+  color: white;
+}
+.category-badge.cat-status {
+  background: #6c4078;
+  color: white;
+}
+.move-stats-row {
+  font-size: .78rem;
+  color: var(--lcd-mid);
+  display: flex;
+  gap: .6rem;
+}
+.move-desc-text {
+  margin: 0;
+  font-size: .8rem;
+  color: #333;
+}
+.btn-equip-move {
+  font-size: .8rem;
+  padding: .35rem .65rem;
+  box-shadow: 0 2px 0 var(--lcd-mid);
+}
+.btn-equip-move.equipped-badge {
+  background: var(--ok);
+  box-shadow: 0 2px 0 #286028;
+  cursor: default;
+}
+.modal-footer {
+  padding: .75rem 1rem;
+  border-top: 2px solid var(--lcd-dark);
+  background: var(--lcd-pale);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
