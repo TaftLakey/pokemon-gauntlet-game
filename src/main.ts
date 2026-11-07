@@ -14,6 +14,7 @@ import {
   parseTeam,
 } from './teams';
 import { getLegalMoves } from './legality';
+import { partyFromRequest, parseHp, type PartyMemberInfo } from './party';
 import {
   getPlayerStatInfo,
   getOpponentStatEstimate,
@@ -110,6 +111,7 @@ function getActiveTeamSets(): PokemonSet[] {
 }
 
 let currentBattlePlayerTeam: PokemonSet[] = getActiveTeamSets();
+let latestBattleRequest: any = null;
 
 // ---- helpers ---------------------------------------------------------------
 const app = document.getElementById('app')!;
@@ -120,19 +122,6 @@ const sprite = (sp: string, back = false) =>
 const spriteFallback = (sp: string, back = false) =>
   `https://play.pokemonshowdown.com/sprites/${back ? 'gen5' : 'dex'}/${spriteId(sp)}.png`;
 const hpClass = (pct: number) => (pct > 50 ? 'ok' : pct > 20 ? 'warn' : 'low');
-const parseHp = (c: string): number => {
-  if (!c || c.includes('fnt')) return 0;
-  const token = c.split(' ')[0];
-  if (token.includes('/')) {
-    const [cur, max] = token.split('/').map(Number);
-    if (!cur || isNaN(cur) || cur <= 0) return 0;
-    if (!max || isNaN(max)) return 100;
-    return Math.max(1, Math.round((cur / max) * 100));
-  }
-  const n = Number(token);
-  if (isNaN(n) || n <= 0) return 0;
-  return Math.min(100, Math.max(1, Math.round(n)));
-};
 
 // ---- tooltip manager -------------------------------------------------------
 const tooltipEl = document.createElement('div');
@@ -179,7 +168,42 @@ function showTooltipFor(target: HTMLElement) {
   const type = target.dataset.inspect;
   if (!type) return;
 
-  if (type === 'bench' || target.dataset.rosterIndex !== undefined) {
+  if (type === 'battle-mon') {
+    const sp = target.dataset.species;
+    if (sp) {
+      const party = latestBattleRequest ? partyFromRequest(latestBattleRequest, currentBattlePlayerTeam) : [];
+      const member = party.find((m) => m.species.toLowerCase() === sp.toLowerCase());
+      const s =
+        member?.set ||
+        currentBattlePlayerTeam.find((p) => p.species.toLowerCase() === sp.toLowerCase()) ||
+        currentBattlePlayerTeam[0];
+      if (s) {
+        tooltipEl.innerHTML = renderPlayerTooltip(getPlayerStatInfo(s));
+        tooltipEl.classList.remove('hidden');
+        positionTooltip(target);
+      }
+    }
+  } else if (type === 'battle-move') {
+    const moveId = target.dataset.moveId;
+    if (moveId) {
+      const mv = Dex.moves.get(moveId);
+      tooltipEl.innerHTML = `
+        <div class="st-header">
+          <div class="st-name-row"><span class="st-name">${mv.name}</span><span class="st-level">${mv.category}</span></div>
+          <div class="st-types"><span class="st-type t-${mv.type.toLowerCase()}">${mv.type}</span></div>
+        </div>
+        <div class="st-meta">
+          <div><b>Base Power:</b> ${mv.basePower || '&ndash;'}</div>
+          <div><b>Accuracy:</b> ${mv.accuracy === true ? '&ndash;' : mv.accuracy + '%'}</div>
+          <div><b>Base PP:</b> ${mv.pp}</div>
+        </div>
+        <div class="st-divider"></div>
+        <p style="margin: 0; font-size: .8rem; color: #333;">${mv.shortDesc || 'No additional effect.'}</p>
+      `;
+      tooltipEl.classList.remove('hidden');
+      positionTooltip(target);
+    }
+  } else if (type === 'bench' || target.dataset.rosterIndex !== undefined) {
     const idx = target.dataset.rosterIndex !== undefined
       ? Number(target.dataset.rosterIndex)
       : Number(target.dataset.benchIndex ?? 0);
@@ -192,7 +216,10 @@ function showTooltipFor(target: HTMLElement) {
     }
   } else if (type === 'player') {
     const activeSpecies = currentBattleMons?.p1?.species;
+    const party = latestBattleRequest ? partyFromRequest(latestBattleRequest, currentBattlePlayerTeam) : [];
+    const activeMember = party.find((m) => m.active);
     const s =
+      activeMember?.set ||
       (activeSpecies &&
         currentBattlePlayerTeam.find(
           (x) => x.species === activeSpecies || x.species.toLowerCase() === activeSpecies.toLowerCase()
@@ -851,22 +878,19 @@ function startBattle(index: number) {
       controlsEl.innerHTML = `<p class="wait">&nbsp;</p>`;
       return;
     }
-    const pk = req.side.pokemon as any[];
+    const party = partyFromRequest(req, playerTeam);
     const trapped = !req.forceSwitch && req.active?.[0]?.trapped;
-    const switches = pk.map((p, i) => {
-      const fnt = p.condition.endsWith(' fnt');
-      const off = locked || p.active || fnt || trapped;
-      const hp = parseHp(p.condition);
-      const name = p.details.split(',')[0];
-      return `<button class="sw ${p.active ? 'active-mon' : ''}" data-c="switch ${i + 1}" data-inspect="bench" data-bench-index="${i}" ${off ? 'disabled' : ''} title="${name} (${hp}%) &middot; Hover for stats">
-        <span>${name}</span><small class="${hpClass(hp)}">${hp}%</small></button>`;
+    const switches = party.map((member) => {
+      const off = locked || member.active || member.fainted || trapped;
+      return `<button class="sw ${member.active ? 'active-mon' : ''}" data-c="switch ${member.slotIndex + 1}" data-inspect="battle-mon" data-species="${member.species}" ${off ? 'disabled' : ''} title="${member.species} (${member.hpPercent}%) &middot; Hover for stats">
+        <span>${member.species}</span><small class="${hpClass(member.hpPercent)}">${member.hpPercent}%</small></button>`;
     }).join('');
     if (req.forceSwitch) {
       controlsEl.innerHTML = `<p class="prompt">Choose your next Pok&eacute;mon</p><div class="switches">${switches}</div>`;
     } else {
       const moves = (req.active[0].moves as any[]).map((m, i) => {
         const mv = Dex.moves.get(m.id);
-        return `<button class="mv t-${mv.type.toLowerCase()}" data-c="move ${i + 1}" ${locked || m.disabled ? 'disabled' : ''}>
+        return `<button class="mv t-${mv.type.toLowerCase()}" data-c="move ${i + 1}" data-inspect="battle-move" data-move-id="${m.id}" ${locked || m.disabled ? 'disabled' : ''} title="${m.move} &middot; ${mv.category} &middot; BP ${mv.basePower || '—'} &middot; ${m.pp}/${m.maxpp} PP">
           <b>${m.move}</b><small>${mv.type} &middot; ${mv.basePower || '&ndash;'} &middot; ${m.pp}/${m.maxpp}</small></button>`;
       }).join('');
       controlsEl.innerHTML = `
@@ -1016,6 +1040,7 @@ function startBattle(index: number) {
         }
       }),
       onRequest: (r) => enqueue(() => {
+        latestBattleRequest = r;
         req = r;
         locked = false;
         clearMoveVisual('p1');
