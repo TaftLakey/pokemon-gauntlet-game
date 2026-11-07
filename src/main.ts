@@ -695,6 +695,94 @@ function startBattle(index: number) {
   let locked = true;
   let result: boolean | null = null;
 
+  // --- Visual and Protocol State Trackers ---
+  const activeStatuses: { p1: string | null; p2: string | null } = { p1: null, p2: null };
+
+  type StatStageKey = 'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'accuracy' | 'evasion';
+  type StatStages = Record<StatStageKey, number>;
+  const defaultStages = (): StatStages => ({
+    atk: 0, def: 0, spa: 0, spd: 0, spe: 0, accuracy: 0, evasion: 0,
+  });
+  const stages: { p1: StatStages; p2: StatStages } = {
+    p1: defaultStages(),
+    p2: defaultStages(),
+  };
+
+  interface SideHazards {
+    stealthRock: boolean;
+    spikes: number;
+    toxicSpikes: number;
+    stickyWeb: boolean;
+  }
+  const defaultHazards = (): SideHazards => ({
+    stealthRock: false,
+    spikes: 0,
+    toxicSpikes: 0,
+    stickyWeb: false,
+  });
+  const hazards: { p1: SideHazards; p2: SideHazards } = {
+    p1: defaultHazards(),
+    p2: defaultHazards(),
+  };
+
+  function renderStatusBadge(side: 'p1' | 'p2'): string {
+    const st = activeStatuses[side];
+    if (!st) return '';
+    return `<span class="status-badge status-${st.toLowerCase()}">${st.toUpperCase()}</span>`;
+  }
+
+  function renderStatStages(side: 'p1' | 'p2'): string {
+    const st = stages[side];
+    const keys: StatStageKey[] = ['atk', 'def', 'spa', 'spd', 'spe', 'accuracy', 'evasion'];
+    const labels: Record<StatStageKey, string> = {
+      atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe', accuracy: 'Acc', evasion: 'Eva'
+    };
+    const chips: string[] = [];
+    for (const k of keys) {
+      const val = st[k];
+      if (val !== 0) {
+        chips.push(`<span class="stat-stage-chip ${val > 0 ? 'boost-pos' : 'boost-neg'}">${labels[k]} ${val > 0 ? '+' + val : val}</span>`);
+      }
+    }
+    return chips.length ? `<div class="stat-stages-row">${chips.join('')}</div>` : '';
+  }
+
+  function renderHazards(side: 'p1' | 'p2'): string {
+    const hz = hazards[side];
+    const chips: string[] = [];
+    if (hz.stealthRock) chips.push(`<span class="hazard-chip">Stealth Rock</span>`);
+    if (hz.spikes > 0) chips.push(`<span class="hazard-chip">Spikes (${hz.spikes})</span>`);
+    if (hz.toxicSpikes > 0) chips.push(`<span class="hazard-chip">Toxic Spikes (${hz.toxicSpikes})</span>`);
+    if (hz.stickyWeb) chips.push(`<span class="hazard-chip">Sticky Web</span>`);
+    return chips.length ? `<div class="hazard-zone">${chips.join('')}</div>` : '';
+  }
+
+  function showFloatingStat(side: 'p1' | 'p2', stat: string, amount: number) {
+    const labels: Record<string, string> = {
+      atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe', accuracy: 'Acc', evasion: 'Eva'
+    };
+    const name = labels[stat] || stat;
+    const arrows = amount > 0 ? '▲'.repeat(Math.min(3, Math.abs(amount))) : '▼'.repeat(Math.min(3, Math.abs(amount)));
+    const el = document.createElement('div');
+    el.className = `floating-stat ${side} ${amount > 0 ? 'stat-up' : 'stat-down'}`;
+    el.textContent = `${name} ${arrows}`;
+    impactSlot.appendChild(el);
+    setTimeout(() => el.remove(), 700);
+  }
+
+  function showStatusAppliedVisual(side: 'p1' | 'p2', statusName: string) {
+    activeStatuses[side] = statusName;
+    if (mons[side]) {
+      updatePlate(side, mons[side]);
+      updateSprite(side, mons[side], 'anim-status-flash');
+      setTimeout(() => {
+        if (mons[side] && !mons[side]!.fainted) {
+          updateSprite(side, mons[side]);
+        }
+      }, 450);
+    }
+  }
+
   // 1. Initialize persistent layout shell once
   app.innerHTML = `
     <header class="slim">
@@ -756,6 +844,9 @@ function startBattle(index: number) {
     const label = isPlayer ? '' : 'Foe ';
     const inspectType = isPlayer ? 'player' : 'foe';
     const cls = hpClass(mon.pct);
+    const monLevel = isPlayer
+      ? (playerTeam.find((p) => p.species === mon.species || p.species.toLowerCase() === mon.species.toLowerCase())?.level ?? 85)
+      : 85;
 
     const existing = slot.querySelector('.plate') as HTMLElement | null;
     if (existing && existing.dataset.species === mon.species) {
@@ -765,22 +856,34 @@ function startBattle(index: number) {
         barInner.style.width = `${mon.pct}%`;
         barInner.className = cls;
       }
-      const hpText = existing.querySelector('.plate-hp span') as HTMLElement | null;
-      if (hpText) {
-        hpText.textContent = `${mon.pct}% HP`;
-        hpText.className = cls;
+      const nameEl = existing.querySelector('b') as HTMLElement | null;
+      if (nameEl) {
+        nameEl.innerHTML = `${label}${mon.species}${renderStatusBadge(side)}`;
+      }
+      const metaRow = existing.querySelector('.plate-meta-row') as HTMLElement | null;
+      if (metaRow) {
+        metaRow.innerHTML = `
+          ${renderStatStages(side)}
+          <div class="plate-hp"><span class="${cls}">${mon.pct}% HP</span></div>
+        `;
+      }
+      const existingHz = existing.querySelector('.hazard-zone') as HTMLElement | null;
+      if (existingHz) {
+        existingHz.outerHTML = renderHazards(side);
+      } else if (renderHazards(side)) {
+        existing.insertAdjacentHTML('beforeend', renderHazards(side));
       }
     } else {
-      const monLevel = isPlayer
-        ? (playerTeam.find((p) => p.species === mon.species || p.species.toLowerCase() === mon.species.toLowerCase())?.level ?? 85)
-        : 85;
-
       // Mount new plate
       slot.innerHTML = `
         <div class="plate" data-inspect="${inspectType}" data-species="${mon.species}" title="Hover for stat breakdown">
-          <b>${label}${mon.species}</b><span>Lv${monLevel}</span>
+          <b>${label}${mon.species}${renderStatusBadge(side)}</b><span>Lv${monLevel}</span>
           <div class="bar"><i class="${cls}" style="width:${mon.pct}%"></i></div>
-          <div class="plate-hp"><span class="${cls}">${mon.pct}% HP</span></div>
+          <div class="plate-meta-row">
+            ${renderStatStages(side)}
+            <div class="plate-hp"><span class="${cls}">${mon.pct}% HP</span></div>
+          </div>
+          ${renderHazards(side)}
         </div>`;
     }
   }
@@ -828,6 +931,14 @@ function startBattle(index: number) {
   function showDamageVisual(side: 'p1' | 'p2') {
     impactSlot.innerHTML = `<div class="hit-burst ${side}">💥</div>`;
     updateSprite(side, mons[side], 'anim-hit-shake');
+    const slot = side === 'p1' ? p1PlateSlot : p2PlateSlot;
+    const plateEl = slot.querySelector('.plate');
+    if (plateEl) {
+      plateEl.classList.remove('anim-plate-flash');
+      void (plateEl as HTMLElement).offsetWidth;
+      plateEl.classList.add('anim-plate-flash');
+      setTimeout(() => plateEl?.classList.remove('anim-plate-flash'), 350);
+    }
   }
 
   function clearDamageVisual(side: 'p1' | 'p2') {
@@ -882,8 +993,12 @@ function startBattle(index: number) {
     const trapped = !req.forceSwitch && req.active?.[0]?.trapped;
     const switches = party.map((member) => {
       const off = locked || member.active || member.fainted || trapped;
+      const memberStatus = member.active ? activeStatuses['p1'] : (member.condition.split(' ')[1] || null);
+      const statusBadgeHtml = memberStatus && !memberStatus.includes('fnt')
+        ? `<span class="status-badge status-${memberStatus.toLowerCase()}">${memberStatus.toUpperCase()}</span>`
+        : '';
       return `<button class="sw ${member.active ? 'active-mon' : ''}" data-c="switch ${member.slotIndex + 1}" data-inspect="battle-mon" data-species="${member.species}" ${off ? 'disabled' : ''} title="${member.species} (${member.hpPercent}%) &middot; Hover for stats">
-        <span>${member.species}</span><small class="${hpClass(member.hpPercent)}">${member.hpPercent}%</small></button>`;
+        <span>${member.species}${statusBadgeHtml}</span><small class="${hpClass(member.hpPercent)}">${member.hpPercent}%</small></button>`;
     }).join('');
     if (req.forceSwitch) {
       controlsEl.innerHTML = `<p class="prompt">Choose your next Pok&eacute;mon</p><div class="switches">${switches}</div>`;
@@ -950,6 +1065,17 @@ function startBattle(index: number) {
           const prevMon = mons[side];
           const hasLiveMon = prevMon && !prevMon.fainted && prevMon.pct > 0;
 
+          // Reset stat stages on switch-out
+          stages[side] = defaultStages();
+
+          // Condition suffix for status
+          const condParts = (b || '').split(' ');
+          if (condParts.length > 1 && !condParts[1].includes('fnt')) {
+            activeStatuses[side] = condParts[1];
+          } else {
+            activeStatuses[side] = null;
+          }
+
           if (hasLiveMon) {
             enqueue(() => {
               updateSprite(side, prevMon, 'anim-recall');
@@ -997,12 +1123,12 @@ function startBattle(index: number) {
               mons[side]!.pct = hp;
               updatePlate(side, mons[side]);
             }
-            // Damage shake strictly handles hit VFX — NEVER triggers faint
             showDamageVisual(side);
             return 300;
           });
         } else if (side && kind === 'faint') {
-          // Exclusively handles knockout — single, uninterrupted faint sequence
+          stages[side] = defaultStages();
+          activeStatuses[side] = null;
           enqueue(() => {
             clearDamageVisual('p1');
             clearDamageVisual('p2');
@@ -1031,6 +1157,152 @@ function startBattle(index: number) {
             showHealVisual(side);
             return 250;
           });
+        } else if (side && kind === '-status') {
+          enqueue(() => {
+            showStatusAppliedVisual(side, a);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 300;
+          });
+        } else if (side && kind === '-curestatus') {
+          enqueue(() => {
+            activeStatuses[side] = null;
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (kind === '-cureteam') {
+          const teamSide = who?.startsWith('p1') ? 'p1' : who?.startsWith('p2') ? 'p2' : null;
+          if (teamSide) {
+            enqueue(() => {
+              activeStatuses[teamSide] = null;
+              if (mons[teamSide]) updatePlate(teamSide, mons[teamSide]);
+              const text = formatLine(l);
+              if (text) appendLog(text);
+              return 0;
+            });
+          }
+        } else if (side && kind === '-boost') {
+          const stat = a as StatStageKey;
+          const amt = Number(b || 1);
+          enqueue(() => {
+            stages[side][stat] = Math.max(-6, Math.min(6, (stages[side][stat] || 0) + amt));
+            showFloatingStat(side, stat, amt);
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 280;
+          });
+        } else if (side && kind === '-unboost') {
+          const stat = a as StatStageKey;
+          const amt = Number(b || 1);
+          enqueue(() => {
+            stages[side][stat] = Math.max(-6, Math.min(6, (stages[side][stat] || 0) - amt));
+            showFloatingStat(side, stat, -amt);
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 280;
+          });
+        } else if (side && kind === '-setboost') {
+          const stat = a as StatStageKey;
+          const amt = Number(b || 0);
+          enqueue(() => {
+            stages[side][stat] = amt;
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (side && kind === '-clearboost') {
+          enqueue(() => {
+            stages[side] = defaultStages();
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (kind === '-clearallboost') {
+          enqueue(() => {
+            stages.p1 = defaultStages();
+            stages.p2 = defaultStages();
+            if (mons.p1) updatePlate('p1', mons.p1);
+            if (mons.p2) updatePlate('p2', mons.p2);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (side && kind === '-clearnegativeboost') {
+          enqueue(() => {
+            for (const k of Object.keys(stages[side]) as StatStageKey[]) {
+              if (stages[side][k] < 0) stages[side][k] = 0;
+            }
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (side && kind === '-invertboost') {
+          enqueue(() => {
+            for (const k of Object.keys(stages[side]) as StatStageKey[]) {
+              stages[side][k] = -stages[side][k];
+            }
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (side && kind === '-copyboost') {
+          const fromSide = b?.startsWith('p1') ? 'p1' : 'p2';
+          enqueue(() => {
+            stages[side] = { ...stages[fromSide] };
+            if (mons[side]) updatePlate(side, mons[side]);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (kind === '-swapboost') {
+          enqueue(() => {
+            const tmp = { ...stages.p1 };
+            stages.p1 = { ...stages.p2 };
+            stages.p2 = tmp;
+            if (mons.p1) updatePlate('p1', mons.p1);
+            if (mons.p2) updatePlate('p2', mons.p2);
+            const text = formatLine(l);
+            if (text) appendLog(text);
+            return 0;
+          });
+        } else if (kind === '-sidestart') {
+          const hzSide = who?.startsWith('p1') ? 'p1' : who?.startsWith('p2') ? 'p2' : null;
+          if (hzSide) {
+            enqueue(() => {
+              const hzName = a || '';
+              if (hzName.includes('Stealth Rock')) hazards[hzSide].stealthRock = true;
+              if (hzName.includes('Toxic Spikes')) hazards[hzSide].toxicSpikes = Math.min(2, hazards[hzSide].toxicSpikes + 1);
+              if (hzName.includes('Spikes')) hazards[hzSide].spikes = Math.min(3, hazards[hzSide].spikes + 1);
+              if (hzName.includes('Sticky Web')) hazards[hzSide].stickyWeb = true;
+              if (mons[hzSide]) updatePlate(hzSide, mons[hzSide]);
+              const text = formatLine(l);
+              if (text) appendLog(text);
+              return 200;
+            });
+          }
+        } else if (kind === '-sideend') {
+          const hzSide = who?.startsWith('p1') ? 'p1' : who?.startsWith('p2') ? 'p2' : null;
+          if (hzSide) {
+            enqueue(() => {
+              const hzName = a || '';
+              if (hzName.includes('Stealth Rock')) hazards[hzSide].stealthRock = false;
+              if (hzName.includes('Toxic Spikes')) hazards[hzSide].toxicSpikes = 0;
+              if (hzName.includes('Spikes')) hazards[hzSide].spikes = 0;
+              if (hzName.includes('Sticky Web')) hazards[hzSide].stickyWeb = false;
+              if (mons[hzSide]) updatePlate(hzSide, mons[hzSide]);
+              const text = formatLine(l);
+              if (text) appendLog(text);
+              return 150;
+            });
+          }
         } else {
           // Informational / secondary lines: append immediately without artificial 400ms stalls
           const text = formatLine(l);

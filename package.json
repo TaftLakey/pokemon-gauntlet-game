@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx scripts/test-pool.ts && tsx scripts/test-party.ts",
+    "test": "tsx scripts/test-pool.ts && tsx scripts/test-party.ts && tsx scripts/test-toxic-spikes.ts",
     "test:pool": "tsx scripts/test-pool.ts",
     "test:party": "tsx scripts/test-party.ts",
+    "test:toxic-spikes": "tsx scripts/test-toxic-spikes.ts",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "smoke": "tsx scripts/smoke.ts",

@@ -1156,3 +1156,169 @@ header.slim {
   justify-content: space-between;
   align-items: center;
 }
+
+/* ---- Status Badges & Stat Stage Indicators ------------------------------ */
+.status-badge {
+  display: inline-block;
+  font-family: 'Silkscreen', monospace;
+  font-size: .65rem;
+  font-weight: 700;
+  padding: .1rem .35rem;
+  border-radius: 2px;
+  line-height: 1;
+  text-transform: uppercase;
+  color: white;
+  margin-left: .35rem;
+  vertical-align: middle;
+  animation: badge-pop-in .25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.status-badge.status-psn,
+.status-badge.status-tox { background: #8f41cb; }
+.status-badge.status-brn { background: #e65100; }
+.status-badge.status-par { background: #d4a017; color: #1f2a1c; }
+.status-badge.status-slp { background: #607d8b; }
+.status-badge.status-frz { background: #00acc1; }
+
+.sw .status-badge {
+  margin-left: auto;
+  font-size: .6rem;
+  padding: .08rem .25rem;
+}
+
+.plate-meta-row {
+  grid-column: span 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: .15rem;
+  gap: .35rem;
+  flex-wrap: wrap;
+}
+.stat-stages-row {
+  display: flex;
+  gap: .25rem;
+  flex-wrap: wrap;
+}
+.stat-stage-chip {
+  font-family: 'Silkscreen', monospace;
+  font-size: .62rem;
+  font-weight: 700;
+  padding: .08rem .3rem;
+  border-radius: 2px;
+  line-height: 1;
+}
+.stat-stage-chip.boost-pos {
+  background: rgba(63, 143, 63, 0.25);
+  color: #276b27;
+  border: 1px solid var(--ok);
+}
+.stat-stage-chip.boost-neg {
+  background: rgba(179, 57, 43, 0.25);
+  color: var(--low);
+  border: 1px solid var(--low);
+}
+
+/* Hazards Indicators */
+.hazard-zone {
+  display: flex;
+  gap: .3rem;
+  flex-wrap: wrap;
+  margin-top: .25rem;
+}
+.hazard-chip {
+  font-family: 'Silkscreen', monospace;
+  font-size: .6rem;
+  padding: .1rem .3rem;
+  background: rgba(31, 42, 28, 0.15);
+  border: 1px solid var(--lcd-dark);
+  color: var(--lcd-dark);
+}
+
+/* Floating Stat Indicators */
+.floating-stat {
+  position: absolute;
+  z-index: 25;
+  font-family: 'Silkscreen', monospace;
+  font-size: 1.15rem;
+  font-weight: 700;
+  pointer-events: none;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.7), -1px -1px 0 rgba(0,0,0,0.7);
+}
+.floating-stat.p1 {
+  bottom: 80px;
+  left: 30%;
+}
+.floating-stat.p2 {
+  bottom: 80px;
+  right: 30%;
+}
+.floating-stat.stat-up {
+  color: #49e049;
+  animation: float-up .7s ease-out forwards;
+}
+.floating-stat.stat-down {
+  color: #ff4d4d;
+  animation: float-down .7s ease-out forwards;
+}
+
+@keyframes float-up {
+  0% { transform: translateY(0); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(-40px); opacity: 0; }
+}
+
+@keyframes float-down {
+  0% { transform: translateY(0); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(35px); opacity: 0; }
+}
+
+@keyframes badge-pop-in {
+  0% { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Damage Plate Flash */
+.plate.anim-plate-flash {
+  animation: plate-damage-flash .3s ease-out;
+}
+@keyframes plate-damage-flash {
+  0% { background: #ff8585; border-color: #b3392b; }
+  50% { background: #ffa3a3; }
+  100% { background: var(--paper); border-color: var(--lcd-dark); }
+}
+
+/* Status Flash on Sprite */
+.battle-sprite.anim-status-flash {
+  animation: status-flash-anim .4s ease-out;
+}
+@keyframes status-flash-anim {
+  0% { filter: drop-shadow(0 0 12px #9c27b0) brightness(1.4); }
+  50% { filter: drop-shadow(0 0 18px #9c27b0) brightness(1.6); }
+  100% { filter: drop-shadow(0 3px 4px rgba(0,0,0,0.18)); }
+}
+
+/* Prefers Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .floating-stat {
+    display: none !important;
+  }
+  .battle-sprite {
+    transform: none !important;
+    animation: none !important;
+  }
+  .plate.anim-plate-flash {
+    animation: none !important;
+    background: var(--paper) !important;
+  }
+}
