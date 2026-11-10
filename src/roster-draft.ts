@@ -1,5 +1,8 @@
+import { Dex } from '@pkmn/sim';
+import type { PokemonSet } from '@pkmn/sim';
 import type { TrainerBuild } from './data';
 import { parseTeam } from './teams';
+import { hashString, mulberry32 } from './rng';
 
 /**
  * First-pass Kanto opponent roster drafts.
@@ -133,4 +136,54 @@ export function capturableMembers(roster: TrainerBuildDraft | TrainerBuild): str
     ? parseTeam(roster.team).map((s) => s.species)
     : roster.team;
   return list.filter((species) => !blocked.has(species));
+}
+
+/** Check if a Pokémon is a legendary, sub-legendary, or mythical species. */
+export function isLegendaryOrMythical(species: string): boolean {
+  const sp = Dex.species.get(species);
+  const tags = sp.tags || [];
+  return tags.includes('Restricted Legendary') || tags.includes('Sub-Legendary') || tags.includes('Mythical');
+}
+
+/**
+ * Returns all parsed Pokémon sets from a trainer's build that are eligible
+ * for drafting: not legendary/mythical, not in uncapturable, and not already
+ * in the player's active team or bench reserves.
+ */
+export function getEligibleDraftSets(
+  build: TrainerBuild,
+  ownedSpecies: Iterable<string>
+): PokemonSet[] {
+  const blocked = new Set((build.uncapturable ?? []).map((s) => s.toLowerCase()));
+  const owned = new Set(Array.from(ownedSpecies).map((s) => s.toLowerCase()));
+  const teamSets = parseTeam(build.team);
+
+  return teamSets.filter((s) => {
+    const spLower = s.species.toLowerCase();
+    if (blocked.has(spLower)) return false;
+    if (isLegendaryOrMythical(s.species)) return false;
+    if (owned.has(spLower)) return false;
+    return true;
+  });
+}
+
+/**
+ * Deterministically picks up to `count` (default 3) sets from eligibleSets
+ * using mulberry32 keyed by day and trainer index.
+ */
+export function pickDraftOptions(
+  eligibleSets: PokemonSet[],
+  key: string,
+  trainerIndex: number,
+  count = 3
+): PokemonSet[] {
+  if (eligibleSets.length <= count) return [...eligibleSets];
+  const rand = mulberry32(hashString(`draft-offer:${key}:${trainerIndex}`));
+  const pool = [...eligibleSets];
+  const chosen: PokemonSet[] = [];
+  while (chosen.length < count && pool.length > 0) {
+    const idx = Math.floor(rand() * pool.length);
+    chosen.push(pool.splice(idx, 1)[0]);
+  }
+  return chosen;
 }

@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx scripts/test-pool.ts && tsx scripts/test-party.ts && tsx scripts/test-toxic-spikes.ts",
+    "test": "tsx scripts/test-pool.ts && tsx scripts/test-party.ts && tsx scripts/test-toxic-spikes.ts && tsx scripts/test-draft.ts",
+    "test:draft": "tsx scripts/test-draft.ts",
     "test:pool": "tsx scripts/test-pool.ts",
     "test:party": "tsx scripts/test-party.ts",
     "test:toxic-spikes": "tsx scripts/test-toxic-spikes.ts",

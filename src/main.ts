@@ -15,6 +15,7 @@ import {
 } from './teams';
 import { getLegalMoves } from './legality';
 import { partyFromRequest, parseHp, type PartyMemberInfo } from './party';
+import { getEligibleDraftSets, pickDraftOptions } from './roster-draft';
 import {
   getPlayerStatInfo,
   getOpponentStatEstimate,
@@ -28,6 +29,13 @@ const SAVE_KEY = `gauntlet:${KEY}`;
 const pool10 = dailyPool10(KEY);
 const AVAILABLE = KANTO.length;
 
+export interface PendingReward {
+  trainerIndex: number;
+  trainerName: string;
+  trainerTitle: string;
+  options: PokemonSet[];
+}
+
 interface Save {
   version?: number;
   status: 'ready' | 'between' | 'inbattle' | 'lost' | 'done';
@@ -35,6 +43,8 @@ interface Save {
   lostTo?: string;
   selectedTeam?: TeamSelectionEntry[];
   bench?: TeamSelectionEntry[];
+  draftedSets?: PokemonSet[];
+  pendingReward?: PendingReward;
 }
 
 function load(): Save {
@@ -46,28 +56,75 @@ function load(): Save {
     /* first visit */
   }
   // Closing the tab mid-battle counts as a forfeit: one attempt per day.
-  if (s.status === 'inbattle') s = { status: 'lost', cleared: s.cleared, lostTo: KANTO[s.cleared].name };
+  if (s.status === 'inbattle') s = { ...s, status: 'lost', cleared: s.cleared, lostTo: KANTO[s.cleared].name };
+
+  // Self-heal: ensure any non-pool species present in saved team or bench are tracked in draftedSets
+  const poolSpecies = new Set(pool10.map((p) => p.species.toLowerCase()));
+  const draftedMap = new Map<string, PokemonSet>();
+  for (const d of s.draftedSets || []) {
+    draftedMap.set(d.species.toLowerCase(), d);
+  }
+
+  const allSavedEntries = [...(s.selectedTeam || []), ...(s.bench || [])];
+  for (const entry of allSavedEntries) {
+    if (!entry || typeof entry.species !== 'string') continue;
+    const spLower = entry.species.toLowerCase();
+    if (!poolSpecies.has(spLower) && !draftedMap.has(spLower)) {
+      const dexSp = Dex.species.get(entry.species);
+      const reconstructed: PokemonSet = {
+        name: '',
+        species: dexSp.exists ? dexSp.name : entry.species,
+        item: 'Leftovers',
+        ability: dexSp.abilities ? dexSp.abilities[0] : '',
+        gender: '',
+        nature: 'Hardy',
+        moves: Array.isArray(entry.moves) && entry.moves.length ? [...entry.moves] : ['Tackle'],
+        level: 85,
+        evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+        ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+      };
+      draftedMap.set(spLower, normalizeSet(reconstructed));
+    }
+  }
+  s.draftedSets = Array.from(draftedMap.values());
+
   return s;
 }
 
 let save = load();
 
+function getAllAvailableSets(s?: Save): PokemonSet[] {
+  const currentSave = s || save;
+  return [...pool10, ...(currentSave?.draftedSets || [])];
+}
+
 function initRosterFromSave(s: Save): TeamSelectionEntry[] {
+  const allSets = getAllAvailableSets(s);
   if (s.selectedTeam && Array.isArray(s.selectedTeam) && s.selectedTeam.length === 6) {
-    const val = validateSelection(pool10, s.selectedTeam);
+    const val = validateSelection(allSets, s.selectedTeam);
     if (val.valid) {
       const active = s.selectedTeam;
       const activeSpecies = new Set(active.map((x) => x.species.toLowerCase()));
-      const remainingPool = pool10.filter((p) => !activeSpecies.has(p.species.toLowerCase()));
+      const remainingPool = allSets.filter((p) => !activeSpecies.has(p.species.toLowerCase()));
 
       let bench: TeamSelectionEntry[] = [];
-      if (
-        s.bench &&
-        Array.isArray(s.bench) &&
-        s.bench.length === 4 &&
-        s.bench.every((b) => remainingPool.some((rp) => rp.species.toLowerCase() === b.species.toLowerCase()))
-      ) {
-        bench = s.bench;
+      if (s.bench && Array.isArray(s.bench)) {
+        const seen = new Set<string>();
+        // Preserve saved bench ordering and customized moves
+        for (const b of s.bench) {
+          const spLower = b?.species?.toLowerCase();
+          if (spLower && !seen.has(spLower) && remainingPool.some((rp) => rp.species.toLowerCase() === spLower)) {
+            seen.add(spLower);
+            bench.push(b);
+          }
+        }
+        // Append any drafted or remaining pool Pokémon not yet on the bench
+        for (const rp of remainingPool) {
+          if (!seen.has(rp.species.toLowerCase())) {
+            seen.add(rp.species.toLowerCase());
+            bench.push({ species: rp.species, moves: [...rp.moves] });
+          }
+        }
       } else {
         bench = remainingPool.map((p) => ({ species: p.species, moves: [...p.moves] }));
       }
@@ -75,8 +132,8 @@ function initRosterFromSave(s: Save): TeamSelectionEntry[] {
     }
   }
 
-  // Fallback to default 10-pool
-  return pool10.map((p) => ({ species: p.species, moves: [...p.moves] }));
+  // Fallback to default pool + drafted
+  return allSets.map((p) => ({ species: p.species, moves: [...p.moves] }));
 }
 
 let selectedRoster: TeamSelectionEntry[] = initRosterFromSave(save);
@@ -85,7 +142,7 @@ const persist = () => {
   try {
     save.version = 1;
     save.selectedTeam = selectedRoster.slice(0, 6);
-    save.bench = selectedRoster.slice(6, 10);
+    save.bench = selectedRoster.slice(6);
     localStorage.setItem(SAVE_KEY, JSON.stringify(save));
   } catch {
     /* storage blocked */
@@ -94,10 +151,27 @@ const persist = () => {
 persist();
 
 function getRosterSets(): PokemonSet[] {
+  const allSets = getAllAvailableSets();
   const map = new Map<string, PokemonSet>();
-  for (const p of pool10) map.set(p.species.toLowerCase(), p);
+  for (const p of allSets) map.set(p.species.toLowerCase(), p);
   return selectedRoster.map((entry) => {
-    const template = map.get(entry.species.toLowerCase()) || pool10[0];
+    const template = map.get(entry.species.toLowerCase());
+    if (!template) {
+      const dexSp = Dex.species.get(entry.species);
+      const fallbackSet: PokemonSet = {
+        name: '',
+        species: dexSp.exists ? dexSp.name : entry.species,
+        item: 'Leftovers',
+        ability: dexSp.abilities ? dexSp.abilities[0] : '',
+        gender: '',
+        nature: 'Hardy',
+        moves: [...entry.moves],
+        level: 85,
+        evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+        ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+      };
+      return normalizeSet(fallbackSet);
+    }
     return normalizeSet({
       ...template,
       moves: [...entry.moves],
@@ -106,7 +180,8 @@ function getRosterSets(): PokemonSet[] {
 }
 
 function getActiveTeamSets(): PokemonSet[] {
-  const val = validateSelection(pool10, selectedRoster.slice(0, 6));
+  const allSets = getAllAvailableSets();
+  const val = validateSelection(allSets, selectedRoster.slice(0, 6));
   return val.team;
 }
 
@@ -268,7 +343,8 @@ function openMoveModal(rosterIndex: number) {
   const entry = selectedRoster[rosterIndex];
   if (!entry) return;
 
-  const template = pool10.find((p) => p.species.toLowerCase() === entry.species.toLowerCase()) || pool10[0];
+  const allSets = getAllAvailableSets();
+  const template = allSets.find((p) => p.species.toLowerCase() === entry.species.toLowerCase()) || allSets[0];
   const allLegal = getLegalMoves(template.species);
 
   // If the template had any legacy factory moves, ensure they are in the available choices
@@ -430,8 +506,114 @@ function openMoveModal(rosterIndex: number) {
   renderModal();
 }
 
+// ---- draft reward screen ---------------------------------------------------
+function renderDraftScreen(reward: PendingReward) {
+  hideTooltip();
+  const { trainerName, options } = reward;
+
+  const cardsHtml = options.map((opt, i) => {
+    const statInfo = getPlayerStatInfo(opt);
+    const typesHtml = statInfo.types.map((t) => `<span class="draft-type-badge">${t}</span>`).join('');
+
+    return `
+      <article class="draft-card">
+        <div class="draft-card-top">
+          <div class="draft-card-sprite-wrap">
+            <img class="draft-card-sprite" src="${sprite(opt.species)}" alt="${opt.species}" onerror="this.onerror=null; this.src='${spriteFallback(opt.species)}';" />
+          </div>
+          <div class="draft-card-info">
+            <h3 class="draft-card-species">${opt.species}</h3>
+            <div class="draft-types-row">${typesHtml}</div>
+          </div>
+        </div>
+
+        <div class="draft-details-table">
+          <span class="draft-details-label">Ability:</span>
+          <span class="draft-details-val">${opt.ability || 'None'}</span>
+          <span class="draft-details-label">Held Item:</span>
+          <span class="draft-details-val">${opt.item || 'None'}</span>
+          <span class="draft-details-label">Nature:</span>
+          <span class="draft-details-val">${opt.nature}</span>
+          <span class="draft-details-label">Level:</span>
+          <span class="draft-details-val">Lv. ${opt.level || 85}</span>
+        </div>
+
+        <div class="draft-stats-row">
+          <div class="draft-stat-cell">
+            <span class="draft-stat-name">HP</span>
+            <span class="draft-stat-val">${statInfo.exactStats.hp}</span>
+          </div>
+          <div class="draft-stat-cell">
+            <span class="draft-stat-name">Atk</span>
+            <span class="draft-stat-val">${statInfo.exactStats.atk}</span>
+          </div>
+          <div class="draft-stat-cell">
+            <span class="draft-stat-name">Def</span>
+            <span class="draft-stat-val">${statInfo.exactStats.def}</span>
+          </div>
+          <div class="draft-stat-cell">
+            <span class="draft-stat-name">SpA</span>
+            <span class="draft-stat-val">${statInfo.exactStats.spa}</span>
+          </div>
+          <div class="draft-stat-cell">
+            <span class="draft-stat-name">SpD</span>
+            <span class="draft-stat-val">${statInfo.exactStats.spd}</span>
+          </div>
+          <div class="draft-stat-cell">
+            <span class="draft-stat-name">Spe</span>
+            <span class="draft-stat-val">${statInfo.exactStats.spe}</span>
+          </div>
+        </div>
+
+        <button class="btn-draft-recruit" data-draft-index="${i}">
+          Recruit ${opt.species} &rarr;
+        </button>
+      </article>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    <header class="slim"><h1>Pok&eacute;mon Daily Gauntlet</h1></header>
+    <main class="draft-container">
+      <header class="draft-header">
+        <h1>Victory! You Defeated ${trainerName}!</h1>
+        <p>Choose 1 Pok&eacute;mon from ${trainerName}'s team to recruit to your bench reserves:</p>
+        <p class="draft-subtext">Recruited Pok&eacute;mon can be swapped into your active 6-Pok&eacute;mon team and customized at any time.</p>
+      </header>
+      <section class="draft-grid">
+        ${cardsHtml}
+      </section>
+    </main>
+  `;
+
+  app.querySelectorAll<HTMLButtonElement>('.btn-draft-recruit').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.draftIndex);
+      const chosen = options[idx];
+      if (!chosen) return;
+
+      const normalizedChosen = normalizeSet(chosen);
+      if (!save.draftedSets) save.draftedSets = [];
+      save.draftedSets.push(normalizedChosen);
+      selectedRoster.push({
+        species: normalizedChosen.species,
+        moves: [...normalizedChosen.moves],
+      });
+      delete save.pendingReward;
+      save.status = save.cleared >= AVAILABLE ? 'done' : 'between';
+      persist();
+      home();
+    });
+  });
+}
+
 // ---- home screen -----------------------------------------------------------
 function home() {
+  if (save.pendingReward) {
+    renderDraftScreen(save.pendingReward);
+    return;
+  }
+
   currentBattleMons = null;
   hideTooltip();
   const done = save.status === 'lost' || save.status === 'done';
@@ -455,12 +637,13 @@ function home() {
     <div class="dev-tools">
       <span style="font-size: .85rem; color: var(--lcd-mid); font-weight: 700;">DEV TOOLS:</span>
       <button id="dev-reset" class="btn-dev">Reset Run (Back to Start)</button>
+      <button id="dev-test-draft" class="btn-dev">Test Draft Screen</button>
       ${save.cleared > 0 && save.status !== 'done' ? `<button id="dev-retry-battle" class="btn-dev">Replay Battle ${save.cleared + 1}</button>` : ''}
     </div>`;
 
   const rosterSets = getRosterSets();
   const activeSets = rosterSets.slice(0, 6);
-  const benchSets = rosterSets.slice(6, 10);
+  const benchSets = rosterSets.slice(6);
 
   function renderCard(s: PokemonSet, rosterIdx: number, isActive: boolean) {
     const isLead = rosterIdx === 0;
@@ -504,7 +687,7 @@ function home() {
         </div>
         <div>
           <div class="team-group-header">
-            <h2>Bench Reserves (4)</h2>
+            <h2>Bench Reserves (${benchSets.length})</h2>
             <span class="subtext">Drag bench Pokémon into active team to swap</span>
           </div>
           <section class="team-grid">${benchSets.map((s, i) => renderCard(s, i + 6, false)).join('')}</section>
@@ -611,7 +794,8 @@ function home() {
     });
 
     document.getElementById('reset-team')?.addEventListener('click', () => {
-      selectedRoster = pool10.map((p) => ({ species: p.species, moves: [...p.moves] }));
+      const allSets = getAllAvailableSets();
+      selectedRoster = allSets.map((p) => ({ species: p.species, moves: [...p.moves] }));
       persist();
       home();
     });
@@ -620,18 +804,37 @@ function home() {
   document.getElementById('go')?.addEventListener('click', () => startBattle(save.cleared));
   document.getElementById('retry')?.addEventListener('click', () => {
     save = { status: 'ready', cleared: 0, version: 1 };
+    selectedRoster = initRosterFromSave(save);
     persist();
     home();
   });
   document.getElementById('dev-reset')?.addEventListener('click', () => {
     save = { status: 'ready', cleared: 0, version: 1 };
+    selectedRoster = initRosterFromSave(save);
     persist();
     home();
   });
   document.getElementById('dev-retry-battle')?.addEventListener('click', () => {
-    save = { status: 'between', cleared: save.cleared, version: 1 };
+    delete save.pendingReward;
+    save = { ...save, status: 'between', cleared: save.cleared, version: 1 };
     persist();
     home();
+  });
+  document.getElementById('dev-test-draft')?.addEventListener('click', () => {
+    const trainerIndex = Math.min(save.cleared, 11);
+    const trainer = KANTO[trainerIndex];
+    const build = dailyTrainerBuild(trainer, KEY, trainerIndex);
+    const currentRosterSpecies = new Set(selectedRoster.map((r) => r.species.toLowerCase()));
+    const eligible = getEligibleDraftSets(build, currentRosterSpecies);
+    const options = pickDraftOptions(eligible, KEY, trainerIndex, 3).map((s) => normalizeSet(s));
+    save.pendingReward = {
+      trainerIndex,
+      trainerName: trainer.name,
+      trainerTitle: trainer.title,
+      options,
+    };
+    persist();
+    renderDraftScreen(save.pendingReward);
   });
 }
 
@@ -683,7 +886,7 @@ function startBattle(index: number) {
   const foeTeam = parseTeam(build.team);
   const playerTeam = getActiveTeamSets();
   currentBattlePlayerTeam = playerTeam;
-  save = { status: 'inbattle', cleared: index };
+  save = { ...save, status: 'inbattle', cleared: index };
   persist();
 
   // Warm up both teams' sprite assets to prevent network/decoding stutter
@@ -981,8 +1184,15 @@ function startBattle(index: number) {
   // E. Controls Renderer (updates action buttons independently)
   function updateControls() {
     if (result !== null) {
-      controlsEl.innerHTML = `<div class="result-action"><button id="back" class="btn-result">${result ? 'Continue Run' : 'See Results'}</button></div>`;
-      document.getElementById('back')?.addEventListener('click', home);
+      if (result && save.pendingReward) {
+        controlsEl.innerHTML = `<div class="result-action"><button id="back" class="btn-result btn-victory-draft">Draft a Pok&eacute;mon &rarr;</button></div>`;
+        document.getElementById('back')?.addEventListener('click', () => {
+          renderDraftScreen(save.pendingReward!);
+        });
+      } else {
+        controlsEl.innerHTML = `<div class="result-action"><button id="back" class="btn-result">${result ? 'Continue Run' : 'See Results'}</button></div>`;
+        document.getElementById('back')?.addEventListener('click', home);
+      }
       return;
     }
     if (!req) {
@@ -1338,9 +1548,38 @@ function startBattle(index: number) {
         clearDamageVisual('p1');
         clearDamageVisual('p2');
         setSwitchOverlay('');
-        save = won
-          ? { status: index + 1 >= AVAILABLE ? 'done' : 'between', cleared: index + 1 }
-          : { status: 'lost', cleared: index, lostTo: trainer.name };
+
+        if (won) {
+          const nextCleared = index + 1;
+          save.cleared = nextCleared;
+          save.status = nextCleared >= AVAILABLE ? 'done' : 'between';
+
+          // Pre-champion battles offer a draft reward (trainers 0..11)
+          if (index < 12) {
+            const build = dailyTrainerBuild(trainer, KEY, index);
+            const currentRosterSpecies = new Set(selectedRoster.map((r) => r.species.toLowerCase()));
+            const eligible = getEligibleDraftSets(build, currentRosterSpecies);
+            const options = pickDraftOptions(eligible, KEY, index, 3).map((s) => normalizeSet(s));
+
+            if (options.length > 0) {
+              save.pendingReward = {
+                trainerIndex: index,
+                trainerName: trainer.name,
+                trainerTitle: trainer.title,
+                options,
+              };
+            }
+          }
+        } else {
+          save = {
+            ...save,
+            status: 'lost',
+            cleared: index,
+            lostTo: trainer.name,
+          };
+          delete save.pendingReward;
+        }
+
         persist();
         updateControls();
         return 0;
