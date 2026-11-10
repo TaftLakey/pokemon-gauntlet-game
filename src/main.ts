@@ -692,9 +692,6 @@ function home() {
           </div>
           <section class="team-grid">${benchSets.map((s, i) => renderCard(s, i + 6, false)).join('')}</section>
         </div>
-        <div class="builder-actions-bar">
-          <button id="reset-team" class="btn-secondary">Reset to Default Team &amp; Moves</button>
-        </div>
       </div>
     `
     : `
@@ -791,13 +788,6 @@ function home() {
           openMoveModal(slot);
         }
       });
-    });
-
-    document.getElementById('reset-team')?.addEventListener('click', () => {
-      const allSets = getAllAvailableSets();
-      selectedRoster = allSets.map((p) => ({ species: p.species, moves: [...p.moves] }));
-      persist();
-      home();
     });
   }
 

@@ -24,10 +24,19 @@ header.slim h1 { font-size: 1.4rem; }
 
 .roster { margin-top: 1.5rem; }
 .roster h2 { font-size: 1rem; margin-bottom: .5rem; }
-.roster ol { margin: 0; padding-left: 1.6rem; columns: 2 260px; }
+.roster ol { margin: 0; padding-left: 1.8rem; columns: 2 280px; column-gap: 2.5rem; }
+.roster li { margin-bottom: .25rem; break-inside: avoid; }
 .roster li span { font-size: .85rem; color: var(--lcd-mid); }
 .roster li.beaten { text-decoration: line-through; opacity: .6; }
-.roster li.next { background: var(--lcd-dark); color: var(--paper); margin-left: -.4rem; padding-left: .4rem; }
+.roster li.next {
+  background: var(--lcd-dark);
+  color: var(--paper);
+  width: fit-content;
+  max-width: 100%;
+  padding: .15rem .5rem;
+  margin-left: -.3rem;
+  border-radius: 3px;
+}
 .roster li.next span { color: var(--lcd-light); }
 .roster li.soon { opacity: .45; }
 
