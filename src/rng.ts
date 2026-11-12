@@ -22,8 +22,34 @@ export function shuffle<T>(arr: T[], rand: () => number): T[] {
   return arr;
 }
 
-/** Everyone shares the same day: UTC date, YYYY-MM-DD. */
-export const todayKey = () => new Date().toISOString().slice(0, 10);
+/** Local calendar date key: YYYY-MM-DD in the player's local timezone. */
+export function todayKey(d = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/** Yesterday's date key in the player's local timezone. */
+export function yesterdayKey(now = new Date()): string {
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  return todayKey(yesterday);
+}
+
+/** Milliseconds remaining until the next local midnight (12:00:00 AM). */
+export function timeUntilNextMidnight(now = new Date()): number {
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+  return Math.max(0, nextMidnight.getTime() - now.getTime());
+}
+
+/** Formats milliseconds into human-readable Xh Ym Zs format. */
+export function formatRemainingTime(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours}h ${minutes}m ${seconds}s`;
+}
 
 /** Four random 16-bit numbers for dynamic battle simulation. */
 export function randomBattleSeed(): number[] {

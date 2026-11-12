@@ -1514,3 +1514,31 @@ header.slim {
   background: #2b3b28;
   box-shadow: 0 4px 0 #182216;
 }
+
+/* ---- Midnight Reset Countdown -------------------------------------------- */
+.midnight-countdown {
+  margin-top: .75rem;
+  padding: .5rem .85rem;
+  background: var(--lcd-pale);
+  border: 2px solid var(--lcd-dark);
+  display: inline-flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: .92rem;
+  box-shadow: 0 3px 0 var(--lcd-mid);
+}
+
+.midnight-countdown .countdown-label {
+  color: var(--lcd-mid);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: .8rem;
+  letter-spacing: .04em;
+}
+
+.midnight-countdown #countdown-timer {
+  font-family: 'Silkscreen', monospace;
+  font-size: .95rem;
+  color: var(--lcd-dark);
+  letter-spacing: .05em;
+}

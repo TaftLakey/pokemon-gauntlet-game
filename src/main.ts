@@ -4,7 +4,13 @@ import type { PokemonSet } from '@pkmn/sim';
 import { KANTO, dailyTrainerBuild } from './data';
 import { BattleRunner } from './battle';
 import { formatLine } from './log';
-import { randomBattleSeed, todayKey } from './rng';
+import {
+  randomBattleSeed,
+  todayKey,
+  yesterdayKey,
+  timeUntilNextMidnight,
+  formatRemainingTime,
+} from './rng';
 import {
   dailyPool10,
   defaultDailySelection,
@@ -24,10 +30,44 @@ import {
 } from './stats';
 
 // ---- daily state -----------------------------------------------------------
-const KEY = todayKey();
-const SAVE_KEY = `gauntlet:${KEY}`;
-const pool10 = dailyPool10(KEY);
+let KEY = todayKey();
+let SAVE_KEY = `gauntlet:${KEY}`;
+let pool10 = dailyPool10(KEY);
 const AVAILABLE = KANTO.length;
+
+function cleanupOldSaves() {
+  try {
+    const keep = new Set([`gauntlet:${todayKey()}`, `gauntlet:${yesterdayKey()}`]);
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('gauntlet:') && !keep.has(k)) {
+        keysToRemove.push(k);
+      }
+    }
+    for (const k of keysToRemove) {
+      localStorage.removeItem(k);
+    }
+  } catch {
+    /* storage blocked */
+  }
+}
+cleanupOldSaves();
+
+function checkDateRollover(): boolean {
+  const currentKey = todayKey();
+  if (currentKey !== KEY && save.status !== 'inbattle') {
+    KEY = currentKey;
+    SAVE_KEY = `gauntlet:${KEY}`;
+    pool10 = dailyPool10(KEY);
+    save = load();
+    selectedRoster = initRosterFromSave(save);
+    persist();
+    cleanupOldSaves();
+    return true;
+  }
+  return false;
+}
 
 export interface PendingReward {
   trainerIndex: number;
@@ -506,8 +546,39 @@ function openMoveModal(rosterIndex: number) {
   renderModal();
 }
 
+// ---- countdown & rollover manager ------------------------------------------
+let countdownTimerId: number | null = null;
+
+function stopMidnightCountdown() {
+  if (countdownTimerId !== null) {
+    clearInterval(countdownTimerId);
+    countdownTimerId = null;
+  }
+}
+
+function startMidnightCountdown() {
+  stopMidnightCountdown();
+  const el = document.getElementById('countdown-timer');
+  if (!el) return;
+
+  const tick = () => {
+    const ms = timeUntilNextMidnight();
+    if (ms <= 1000) {
+      stopMidnightCountdown();
+      checkDateRollover();
+      home();
+      return;
+    }
+    el.textContent = formatRemainingTime(ms);
+  };
+
+  tick();
+  countdownTimerId = window.setInterval(tick, 1000);
+}
+
 // ---- draft reward screen ---------------------------------------------------
 function renderDraftScreen(reward: PendingReward) {
+  stopMidnightCountdown();
   hideTooltip();
   const { trainerName, options } = reward;
 
@@ -609,6 +680,12 @@ function renderDraftScreen(reward: PendingReward) {
 
 // ---- home screen -----------------------------------------------------------
 function home() {
+  if (checkDateRollover()) {
+    return;
+  }
+
+  stopMidnightCountdown();
+
   if (save.pendingReward) {
     renderDraftScreen(save.pendingReward);
     return;
@@ -626,11 +703,13 @@ function home() {
     action = `<button id="go">Battle ${next.name} (${nextBuild?.name ?? ''})</button>`;
   else if (save.status === 'lost')
     action = `
-      <p class="result lost">Your run ended against ${save.lostTo}. ${save.cleared} of ${KANTO.length} trainers beaten. New team at midnight UTC.</p>
+      <p class="result lost">Your run ended against ${save.lostTo}. ${save.cleared} of ${KANTO.length} trainers beaten. New run available at midnight.</p>
+      <div><div class="midnight-countdown"><span class="countdown-label">Next gauntlet in:</span> <b id="countdown-timer">--h --m --s</b></div></div>
       <div style="margin-top: 1rem;"><button id="retry" class="btn-secondary">Try Again</button></div>`;
   else
     action = `
-      <p class="result won">${save.cleared === KANTO.length ? 'Champion! You cleared the whole Kanto league.' : `You beat all ${save.cleared} trainers available so far.`}</p>
+      <p class="result won">${save.cleared === KANTO.length ? 'Champion! You cleared the whole Kanto league.' : `You beat all ${save.cleared} trainers available so far.`} New run available at midnight.</p>
+      <div><div class="midnight-countdown"><span class="countdown-label">Next gauntlet in:</span> <b id="countdown-timer">--h --m --s</b></div></div>
       <div style="margin-top: 1rem;"><button id="retry" class="btn-secondary">Play Again</button></div>`;
 
   const devToolbar = `
@@ -826,6 +905,10 @@ function home() {
     persist();
     renderDraftScreen(save.pendingReward);
   });
+
+  if (done) {
+    startMidnightCountdown();
+  }
 }
 
 // ---- battle screen ---------------------------------------------------------
@@ -871,6 +954,7 @@ function preloadBattleSprites(p1Team: PokemonSet[], p2Team: PokemonSet[]) {
 }
 
 function startBattle(index: number) {
+  stopMidnightCountdown();
   const trainer = KANTO[index];
   const build = dailyTrainerBuild(trainer, KEY, index);
   const foeTeam = parseTeam(build.team);
